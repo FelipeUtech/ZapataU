@@ -66,32 +66,38 @@ class VisualizadorMallaMejorado:
         H_suelo_total = sum([c['espesor'] for c in capas])
 
         # Mallado
-        nx_suelo, ny_suelo, nz_suelo = 6, 6, 6
+        nx_suelo, ny_suelo = 6, 6
+        nz_suelo_estratificado = 6
+        nz_relleno = 2
+        nz_total = nz_suelo_estratificado + nz_relleno
         nx_zap, ny_zap, nz_zap = 4, 4, 2
         nx_ped, ny_ped, nz_ped = 2, 2, 2
 
-        # Coordenadas Z
-        z_base_suelo = -prof_desp - H_suelo_total
+        # GEOMETRÍA CORRECTA: z=0 es la superficie
+        z_superficie = 0.0
         z_base_zapata = -prof_desp
         z_top_zapata = z_base_zapata + h_zap
+        z_base_suelo = z_base_zapata - H_suelo_total
         z_top_pedestal = z_top_zapata + h_ped
+        H_relleno = z_superficie - z_top_zapata
+        H_total = H_suelo_total + H_relleno
 
         node_counter = 1
         elem_counter = 1
 
-        # === CREAR NODOS DEL SUELO ===
+        # === CREAR NODOS DEL SUELO Y RELLENO ===
         print("  Creando nodos del suelo...")
         nodos_suelo_map = {}
         dx_suelo = L_suelo_x / nx_suelo
         dy_suelo = L_suelo_y / ny_suelo
-        dz_suelo = H_suelo_total / nz_suelo
+        dz_total = H_total / nz_total
 
-        for k in range(nz_suelo + 1):
+        for k in range(nz_total + 1):
             for j in range(ny_suelo + 1):
                 for i in range(nx_suelo + 1):
                     x = -L_suelo_x/2 + i * dx_suelo
                     y = -L_suelo_y/2 + j * dy_suelo
-                    z = z_base_suelo + k * dz_suelo
+                    z = z_base_suelo + k * dz_total
 
                     ops.node(node_counter, x, y, z)
                     self.nodos_coords[node_counter] = (x, y, z)
@@ -108,7 +114,7 @@ class VisualizadorMallaMejorado:
 
         i_start_zap = (nx_suelo - nx_zap) // 2
         j_start_zap = (ny_suelo - ny_zap) // 2
-        k_base_zap = nz_suelo
+        k_base_zap = nz_suelo_estratificado  # La zapata empieza en el nivel de la base de zapata
 
         for k in range(nz_zap + 1):
             for j in range(ny_zap + 1):
@@ -181,10 +187,27 @@ class VisualizadorMallaMejorado:
         # === CREAR ELEMENTOS Y EXTRAER ARISTAS ===
         print("  Creando elementos y extrayendo aristas...")
 
-        # Elementos del suelo
-        for k in range(nz_suelo):
+        # Determinar región de la zapata
+        i_min_zap = i_start_zap
+        i_max_zap = i_start_zap + nx_zap
+        j_min_zap = j_start_zap
+        j_max_zap = j_start_zap + ny_zap
+        k_min_zap = nz_suelo_estratificado
+        k_max_zap = k_min_zap + nz_zap
+
+        # Elementos del suelo y relleno (omitiendo región de zapata)
+        for k in range(nz_total):
             for j in range(ny_suelo):
                 for i in range(nx_suelo):
+                    # Verificar si este elemento está en la región de la zapata
+                    en_region_zapata = (k >= k_min_zap and k < k_max_zap and
+                                       i >= i_min_zap and i < i_max_zap and
+                                       j >= j_min_zap and j < j_max_zap)
+
+                    # Si está en la región de la zapata, NO crear elemento
+                    if en_region_zapata:
+                        continue
+
                     nodos = [
                         nodos_suelo_map[(i, j, k)],
                         nodos_suelo_map[(i+1, j, k)],

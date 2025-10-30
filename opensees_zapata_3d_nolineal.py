@@ -62,6 +62,22 @@ class ModeloZapata3DNoLineal:
         ops.nDMaterial('ElasticIsotropic', 1, E_conc, nu_conc, rho_conc)
         print(f"✓ Material 1: Concreto (E={E_conc/1e9:.1f} GPa) - Elástico")
 
+        # Material para relleno (lleno)
+        E_lleno = self.config['materiales']['lleno']['E']
+        nu_lleno = self.config['materiales']['lleno']['nu']
+        rho_lleno = self.config['materiales']['lleno']['densidad']
+        coh_lleno = self.config['materiales']['lleno']['cohesion']
+        phi_lleno = self.config['materiales']['lleno']['friccion_grados'] * np.pi / 180
+
+        G_lleno = E_lleno / (2 * (1 + nu_lleno))
+        K_lleno = E_lleno / (3 * (1 - 2*nu_lleno))
+        sigma_y_lleno = 6 * coh_lleno if coh_lleno > 0 else 50000
+        H_iso_lleno = 0.02 * E_lleno
+
+        # Usar elástico para relleno por ahora (más estable)
+        ops.nDMaterial('ElasticIsotropic', 2, E_lleno, nu_lleno, rho_lleno)
+        print(f"✓ Material 2: Relleno (E={E_lleno/1e6:.1f} MPa) - ElasticIsotropic")
+
         # Materiales no lineales para capas de suelo
         mat_id = 10
         for i, capa in enumerate(self.config['suelo_estratificado']['capas'], 1):
@@ -87,16 +103,9 @@ class ModeloZapata3DNoLineal:
             # Módulo de endurecimiento (típicamente 1-10% del módulo elástico)
             H_iso = 0.02 * E  # 2% hardening
 
-            try:
-                # Intentar usar J2Plasticity (Von Mises con endurecimiento isótropo)
-                ops.nDMaterial('J2Plasticity', mat_id, K, G, sigma_y, sigma_y, 0, H_iso, rho)
-                print(f"✓ Material {mat_id}: {capa['nombre']} - J2Plasticity")
-                print(f"    K={K/1e6:.1f} MPa, G={G/1e6:.1f} MPa, σ_y={sigma_y/1000:.1f} kPa")
-            except:
-                # Si J2Plasticity no está disponible, usar ElasticIsotropic
-                print(f"⚠ J2Plasticity no disponible, usando ElasticIsotropic para {capa['nombre']}")
-                ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
-                print(f"✓ Material {mat_id}: {capa['nombre']} - ElasticIsotropic (fallback)")
+            # Usar materiales elásticos por ahora (más estables para verificar geometría)
+            ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
+            print(f"✓ Material {mat_id}: {capa['nombre']} - ElasticIsotropic (E={E/1e6:.1f} MPa)")
 
             capa['mat_id'] = mat_id
             mat_id += 1
@@ -130,40 +139,58 @@ class ModeloZapata3DNoLineal:
         ny_zap = 4    # elementos en Y de la zapata
         nz_zap = 2    # elementos en Z de la zapata
 
-        # Profundidad total del suelo
+        # Profundidad total del suelo BAJO la zapata
         H_suelo_total = sum([c['espesor'] for c in capas])
         nz_suelo = len(capas) * 2  # 2 elementos por capa
 
-        # Coordenadas Z
-        z_base_suelo = -prof_desp - H_suelo_total
-        z_base_zapata = -prof_desp
-        z_top_zapata = z_base_zapata + h_zap
+        # GEOMETRÍA CORRECTA: z=0 es la superficie
+        z_superficie = 0.0
+        z_base_zapata = -prof_desp  # Base de zapata a profundidad Df
+        z_tope_zapata = z_base_zapata + h_zap  # Tope de zapata
+        z_base_suelo = z_base_zapata - H_suelo_total  # Suelo bajo la zapata
 
+        # Altura del relleno desde tope de zapata hasta superficie
+        H_relleno = z_superficie - z_tope_zapata
+        nz_relleno = 2  # 2 elementos para el relleno
+
+        print(f"\n  GEOMETRÍA DEL MODELO (z=0 es la superficie):")
+        print(f"    Superficie del suelo: z = {z_superficie:.2f} m")
+        print(f"    Tope de zapata: z = {z_tope_zapata:.2f} m")
+        print(f"    Base de zapata: z = {z_base_zapata:.2f} m (prof. Df = {prof_desp:.2f} m)")
+        print(f"    Base del suelo: z = {z_base_suelo:.2f} m")
         print(f"\n  Dimensiones de la zapata: {B_x} × {B_y} × {h_zap} m")
         print(f"  Dimensiones del suelo: {L_suelo_x} × {L_suelo_y} × {H_suelo_total} m")
+        print(f"  Espesor de relleno: {H_relleno:.2f} m")
         print(f"  Mallado suelo: {nx_suelo} × {ny_suelo} × {nz_suelo}")
         print(f"  Mallado zapata: {nx_zap} × {ny_zap} × {nz_zap}")
+        print(f"  Mallado relleno: {nx_suelo} × {ny_suelo} × {nz_relleno}")
 
-        # CREAR NODOS DEL SUELO
-        print("\n  Creando nodos del suelo...")
+        # CREAR NODOS DEL SUELO Y RELLENO
+        # La malla se extiende desde z_base_suelo hasta z_superficie
+        print("\n  Creando nodos del suelo y relleno...")
         nodos_suelo = {}
 
         dx_suelo = L_suelo_x / nx_suelo
         dy_suelo = L_suelo_y / ny_suelo
-        dz_suelo = H_suelo_total / nz_suelo
 
-        for k in range(nz_suelo + 1):
+        # Total de capas en Z: suelo estratificado + relleno
+        nz_total = nz_suelo + nz_relleno
+        H_total = H_suelo_total + H_relleno
+        dz_total = H_total / nz_total
+
+        for k in range(nz_total + 1):
             for j in range(ny_suelo + 1):
                 for i in range(nx_suelo + 1):
                     x = -L_suelo_x/2 + i * dx_suelo
                     y = -L_suelo_y/2 + j * dy_suelo
-                    z = z_base_suelo + k * dz_suelo
+                    z = z_base_suelo + k * dz_total
 
                     ops.node(self.node_counter, x, y, z)
                     nodos_suelo[(i, j, k)] = self.node_counter
                     self.node_counter += 1
 
-        print(f"  ✓ {len(nodos_suelo)} nodos del suelo creados")
+        print(f"  ✓ {len(nodos_suelo)} nodos del suelo/relleno creados")
+        print(f"    Desde z = {z_base_suelo:.2f} m hasta z = {z_superficie:.2f} m")
 
         # CREAR NODOS DE LA ZAPATA (compartiendo nodos con el suelo en la interfaz)
         print("\n  Creando nodos de la zapata...")
@@ -176,7 +203,7 @@ class ModeloZapata3DNoLineal:
         # Encontrar índices del suelo donde se ubica la zapata
         i_start_zap = (nx_suelo - nx_zap) // 2
         j_start_zap = (ny_suelo - ny_zap) // 2
-        k_base_zap = nz_suelo  # La zapata empieza en la parte superior del suelo
+        k_base_zap = nz_suelo  # Índice k donde empieza la zapata (en z_base_zapata)
 
         for k in range(nz_zap + 1):
             for j in range(ny_zap + 1):
@@ -187,9 +214,9 @@ class ModeloZapata3DNoLineal:
 
                     # En la base de la zapata (k=0), compartir nodos con el suelo
                     if k == 0:
-                        # Buscar el nodo más cercano del suelo
-                        i_suelo = int(round(i_start_zap + i * nx_zap / nx_suelo * (nx_suelo / (nx_suelo - nx_zap))))
-                        j_suelo = int(round(j_start_zap + j * ny_zap / ny_suelo * (ny_suelo / (ny_suelo - ny_zap))))
+                        # Mapear a índices del suelo
+                        i_suelo = i_start_zap + int(round(i * 1.0))
+                        j_suelo = j_start_zap + int(round(j * 1.0))
                         k_suelo = k_base_zap
 
                         # Limitar índices
@@ -215,10 +242,14 @@ class ModeloZapata3DNoLineal:
 
         self.nodos['suelo'] = nodos_suelo
         self.nodos['zapata'] = nodos_zapata
-        self.nx_suelo, self.ny_suelo, self.nz_suelo = nx_suelo, ny_suelo, nz_suelo
+        self.nx_suelo, self.ny_suelo, self.nz_suelo = nx_suelo, ny_suelo, nz_total
         self.nx_zap, self.ny_zap, self.nz_zap = nx_zap, ny_zap, nz_zap
+        self.nz_suelo_estratificado = nz_suelo  # Guardar para crear elementos
+        self.z_base_zapata = z_base_zapata
+        self.z_tope_zapata = z_tope_zapata
+        self.i_start_zap, self.j_start_zap = i_start_zap, j_start_zap
 
-        return z_top_zapata
+        return z_tope_zapata
 
     def crear_elementos(self):
         """Crea los elementos sólidos para suelo y zapata"""
@@ -226,19 +257,46 @@ class ModeloZapata3DNoLineal:
         print("CREANDO ELEMENTOS")
         print("-"*60)
 
-        # ELEMENTOS DEL SUELO
-        print("\n  Elementos del suelo...")
+        # ELEMENTOS DEL SUELO Y RELLENO
+        print("\n  Elementos del suelo y relleno...")
         capas = self.config['suelo_estratificado']['capas']
-        elem_por_capa = self.nz_suelo // len(capas)
+        elem_por_capa = self.nz_suelo_estratificado // len(capas)
+
+        # Determinar región de la zapata
+        i_min = self.i_start_zap
+        i_max = self.i_start_zap + self.nx_zap
+        j_min = self.j_start_zap
+        j_max = self.j_start_zap + self.ny_zap
+        k_min_zap = self.nz_suelo_estratificado
+        k_max_zap = k_min_zap + self.nz_zap
 
         num_elem_suelo = 0
-        for k in range(self.nz_suelo):
-            # Determinar qué material usar según la capa
-            capa_idx = min(k // elem_por_capa, len(capas) - 1)
-            mat_id = capas[capa_idx]['mat_id']
+        num_elem_relleno = 0
 
+        for k in range(self.nz_suelo):
             for j in range(self.ny_suelo):
                 for i in range(self.nx_suelo):
+                    # Verificar si este elemento está en la región de la zapata
+                    en_region_zapata = (k >= k_min_zap and k < k_max_zap and
+                                       i >= i_min and i < i_max and
+                                       j >= j_min and j < j_max)
+
+                    # Si está en la región de la zapata, NO crear elemento de suelo/relleno
+                    if en_region_zapata:
+                        continue
+
+                    # Determinar qué material usar
+                    if k < self.nz_suelo_estratificado:
+                        # Suelo estratificado
+                        capa_idx = min(k // elem_por_capa, len(capas) - 1)
+                        mat_id = capas[capa_idx]['mat_id']
+                        num_elem_suelo += 1
+                    else:
+                        # Relleno
+                        mat_id = 2
+                        num_elem_relleno += 1
+
+                    # Crear elemento
                     n1 = self.nodos['suelo'][(i, j, k)]
                     n2 = self.nodos['suelo'][(i+1, j, k)]
                     n3 = self.nodos['suelo'][(i+1, j+1, k)]
@@ -251,9 +309,9 @@ class ModeloZapata3DNoLineal:
                     ops.element('stdBrick', self.elem_counter,
                                n1, n2, n3, n4, n5, n6, n7, n8, mat_id)
                     self.elem_counter += 1
-                    num_elem_suelo += 1
 
-        print(f"  ✓ {num_elem_suelo} elementos de suelo creados")
+        print(f"  ✓ {num_elem_suelo} elementos de suelo estratificado creados")
+        print(f"  ✓ {num_elem_relleno} elementos de relleno creados")
 
         # ELEMENTOS DE LA ZAPATA
         print("\n  Elementos de la zapata...")
@@ -356,18 +414,18 @@ class ModeloZapata3DNoLineal:
         analisis = self.config['analisis']
 
         # Configuración del análisis no lineal
-        ops.system('UmfPack')
+        ops.system('BandGeneral')
         ops.numberer('RCM')
         ops.constraints('Transformation')
-        ops.test('NormDispIncr', 1.0e-6, 50, 0)
+        ops.test('NormDispIncr', 1.0e-4, 100, 0)
         ops.algorithm('Newton')
-        ops.integrator('LoadControl', 0.1)
+        ops.integrator('LoadControl', 0.05)
         ops.analysis('Static')
 
-        print("\n  Sistema: UmfPack")
+        print("\n  Sistema: BandGeneral")
         print("  Algoritmo: Newton")
-        print("  Integrador: LoadControl incremental")
-        print("  Convergencia: NormDispIncr (tol=1e-6, max_iter=50)")
+        print("  Integrador: LoadControl (0.05 por paso)")
+        print("  Convergencia: NormDispIncr (tol=1e-4, max_iter=100)")
 
         # Análisis incremental
         num_pasos = 10
