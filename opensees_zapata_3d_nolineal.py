@@ -132,122 +132,123 @@ class ModeloZapata3DNoLineal:
         L_suelo_x = B_x * 2.5
         L_suelo_y = B_y * 2.5
 
-        # Mallado simplificado pero funcional
-        nx_suelo = 6  # elementos en X del suelo
-        ny_suelo = 6  # elementos en Y del suelo
+        # ESTRATEGIA: Crear malla con coordenadas compatibles
+        # Los nodos del suelo deben incluir EXACTAMENTE las coordenadas de la base de la zapata
+
         nx_zap = 4    # elementos en X de la zapata
         ny_zap = 4    # elementos en Y de la zapata
         nz_zap = 2    # elementos en Z de la zapata
+
+        # Elementos extra a cada lado de la zapata
+        nx_extra = 2  # elementos adicionales a cada lado en X
+        ny_extra = 2  # elementos adicionales a cada lado en Y
 
         # Profundidad total del suelo BAJO la zapata
         H_suelo_total = sum([c['espesor'] for c in capas])
         nz_suelo = len(capas) * 2  # 2 elementos por capa
 
         # GEOMETRÍA CORRECTA: z=0 es la superficie
-        z_superficie = 0.0
-        z_base_zapata = -prof_desp  # Base de zapata a profundidad Df
-        z_tope_zapata = z_base_zapata + h_zap  # Tope de zapata
-        z_base_suelo = z_base_zapata - H_suelo_total  # Suelo bajo la zapata
-
-        # Altura del relleno desde tope de zapata hasta superficie
-        H_relleno = z_superficie - z_tope_zapata
-        nz_relleno = 2  # 2 elementos para el relleno
+        # NOTA: Por ahora sin relleno para simplificar (problema de convergencia)
+        z_base_zapata = -prof_desp
+        z_tope_zapata = z_base_zapata + h_zap
+        z_superficie = z_tope_zapata  # Superficie al nivel del tope de zapata (SIN RELLENO)
+        z_base_suelo = z_base_zapata - H_suelo_total
+        H_relleno = 0  # SIN RELLENO POR AHORA
+        nz_relleno = 0
 
         print(f"\n  GEOMETRÍA DEL MODELO (z=0 es la superficie):")
         print(f"    Superficie del suelo: z = {z_superficie:.2f} m")
         print(f"    Tope de zapata: z = {z_tope_zapata:.2f} m")
         print(f"    Base de zapata: z = {z_base_zapata:.2f} m (prof. Df = {prof_desp:.2f} m)")
         print(f"    Base del suelo: z = {z_base_suelo:.2f} m")
-        print(f"\n  Dimensiones de la zapata: {B_x} × {B_y} × {h_zap} m")
-        print(f"  Dimensiones del suelo: {L_suelo_x} × {L_suelo_y} × {H_suelo_total} m")
-        print(f"  Espesor de relleno: {H_relleno:.2f} m")
-        print(f"  Mallado suelo: {nx_suelo} × {ny_suelo} × {nz_suelo}")
-        print(f"  Mallado zapata: {nx_zap} × {ny_zap} × {nz_zap}")
-        print(f"  Mallado relleno: {nx_suelo} × {ny_suelo} × {nz_relleno}")
 
-        # CREAR NODOS DEL SUELO Y RELLENO
-        # La malla se extiende desde z_base_suelo hasta z_superficie
+        # CREAR COORDENADAS X e Y CON COMPATIBILIDAD GARANTIZADA
+        # Primero definir coordenadas de la zapata
+        dx_zap = B_x / nx_zap
+        dy_zap = B_y / ny_zap
+
+        x_zap_coords = np.array([-B_x/2 + i*dx_zap for i in range(nx_zap + 1)])
+        y_zap_coords = np.array([-B_y/2 + j*dy_zap for j in range(ny_zap + 1)])
+
+        # Coordenadas del suelo: incluir las de la zapata + extensión a los lados
+        dx_extra = (L_suelo_x - B_x) / (2 * nx_extra)
+        dy_extra = (L_suelo_y - B_y) / (2 * ny_extra)
+
+        # Construir coordenadas del suelo
+        x_suelo_izq = np.array([-L_suelo_x/2 + i*dx_extra for i in range(nx_extra)])
+        x_suelo_der = np.array([B_x/2 + (i+1)*dx_extra for i in range(nx_extra)])
+        x_suelo_coords = np.concatenate([x_suelo_izq, x_zap_coords, x_suelo_der])
+
+        y_suelo_izq = np.array([-L_suelo_y/2 + j*dy_extra for j in range(ny_extra)])
+        y_suelo_der = np.array([B_y/2 + (j+1)*dy_extra for j in range(ny_extra)])
+        y_suelo_coords = np.concatenate([y_suelo_izq, y_zap_coords, y_suelo_der])
+
+        nx_suelo = len(x_suelo_coords) - 1
+        ny_suelo = len(y_suelo_coords) - 1
+
+        print(f"\n  Mallado con coordenadas compatibles:")
+        print(f"    Suelo: {nx_suelo} × {ny_suelo} elementos en XY")
+        print(f"    Zapata: {nx_zap} × {ny_zap} elementos en XY")
+        print(f"    Inicio zapata en índices: i=[{nx_extra}:{nx_extra+nx_zap}], j=[{ny_extra}:{ny_extra+ny_zap}]")
+
+        # CREAR NODOS DEL SUELO Y RELLENO con coordenadas exactas
         print("\n  Creando nodos del suelo y relleno...")
         nodos_suelo = {}
 
-        dx_suelo = L_suelo_x / nx_suelo
-        dy_suelo = L_suelo_y / ny_suelo
-
-        # Total de capas en Z: suelo estratificado + relleno
         nz_total = nz_suelo + nz_relleno
         H_total = H_suelo_total + H_relleno
         dz_total = H_total / nz_total
 
         for k in range(nz_total + 1):
+            z = z_base_suelo + k * dz_total
             for j in range(ny_suelo + 1):
                 for i in range(nx_suelo + 1):
-                    x = -L_suelo_x/2 + i * dx_suelo
-                    y = -L_suelo_y/2 + j * dy_suelo
-                    z = z_base_suelo + k * dz_total
+                    x = x_suelo_coords[i]
+                    y = y_suelo_coords[j]
 
                     ops.node(self.node_counter, x, y, z)
                     nodos_suelo[(i, j, k)] = self.node_counter
                     self.node_counter += 1
 
         print(f"  ✓ {len(nodos_suelo)} nodos del suelo/relleno creados")
-        print(f"    Desde z = {z_base_suelo:.2f} m hasta z = {z_superficie:.2f} m")
 
-        # CREAR NODOS DE LA ZAPATA (compartiendo nodos con el suelo en la interfaz)
+        # CREAR NODOS DE LA ZAPATA compartiendo nodos en la base
         print("\n  Creando nodos de la zapata...")
         nodos_zapata = {}
 
-        dx_zap = B_x / nx_zap
-        dy_zap = B_y / ny_zap
         dz_zap = h_zap / nz_zap
-
-        # Encontrar índices del suelo donde se ubica la zapata
-        i_start_zap = (nx_suelo - nx_zap) // 2
-        j_start_zap = (ny_suelo - ny_zap) // 2
-        k_base_zap = nz_suelo  # Índice k donde empieza la zapata (en z_base_zapata)
+        k_base_zap = nz_suelo  # Índice k de la base de zapata en la malla del suelo
 
         for k in range(nz_zap + 1):
+            z = z_base_zapata + k * dz_zap
             for j in range(ny_zap + 1):
                 for i in range(nx_zap + 1):
-                    x = -B_x/2 + i * dx_zap
-                    y = -B_y/2 + j * dy_zap
-                    z = z_base_zapata + k * dz_zap
-
-                    # En la base de la zapata (k=0), compartir nodos con el suelo
                     if k == 0:
-                        # Mapear a índices del suelo
-                        i_suelo = i_start_zap + int(round(i * 1.0))
-                        j_suelo = j_start_zap + int(round(j * 1.0))
-                        k_suelo = k_base_zap
-
-                        # Limitar índices
-                        i_suelo = max(0, min(nx_suelo, i_suelo))
-                        j_suelo = max(0, min(ny_suelo, j_suelo))
-
-                        if (i_suelo, j_suelo, k_suelo) in nodos_suelo:
-                            nodos_zapata[(i, j, k)] = nodos_suelo[(i_suelo, j_suelo, k_suelo)]
-                        else:
-                            # Crear nuevo nodo si no existe
-                            ops.node(self.node_counter, x, y, z)
-                            nodos_zapata[(i, j, k)] = self.node_counter
-                            self.node_counter += 1
+                        # En la base: compartir nodo con suelo (COORDENADAS IDÉNTICAS)
+                        i_suelo = nx_extra + i
+                        j_suelo = ny_extra + j
+                        nodos_zapata[(i, j, k)] = nodos_suelo[(i_suelo, j_suelo, k_base_zap)]
                     else:
-                        # Nodos superiores de la zapata son independientes
+                        # Arriba de la base: crear nuevos nodos
+                        x = x_zap_coords[i]
+                        y = y_zap_coords[j]
                         ops.node(self.node_counter, x, y, z)
                         nodos_zapata[(i, j, k)] = self.node_counter
                         self.node_counter += 1
 
+        nodos_compartidos = (nx_zap + 1) * (ny_zap + 1)
         print(f"  ✓ {len(nodos_zapata)} entradas de nodos para zapata")
-        nodos_nuevos_zap = len([n for n in nodos_zapata.values() if n >= max(nodos_suelo.values())])
-        print(f"  ✓ {nodos_nuevos_zap} nodos nuevos creados (otros compartidos con suelo)")
+        print(f"  ✓ {nodos_compartidos} nodos compartidos en la interfaz (COORDENADAS IDÉNTICAS)")
 
         self.nodos['suelo'] = nodos_suelo
         self.nodos['zapata'] = nodos_zapata
         self.nx_suelo, self.ny_suelo, self.nz_suelo = nx_suelo, ny_suelo, nz_total
         self.nx_zap, self.ny_zap, self.nz_zap = nx_zap, ny_zap, nz_zap
-        self.nz_suelo_estratificado = nz_suelo  # Guardar para crear elementos
+        self.nz_suelo_estratificado = nz_suelo
         self.z_base_zapata = z_base_zapata
         self.z_tope_zapata = z_tope_zapata
-        self.i_start_zap, self.j_start_zap = i_start_zap, j_start_zap
+        self.i_start_zap, self.j_start_zap = nx_extra, ny_extra
+        self.nx_extra, self.ny_extra = nx_extra, ny_extra
 
         return z_tope_zapata
 
