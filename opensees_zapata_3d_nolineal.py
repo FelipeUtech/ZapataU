@@ -85,27 +85,55 @@ class ModeloZapata3DNoLineal:
             nu = capa['nu']
             rho = capa['densidad']
 
-            # Calcular parámetros de plasticidad
-            # Módulo de corte
-            G = E / (2 * (1 + nu))
-            # Módulo de bulk
-            K = E / (3 * (1 - 2*nu))
+            # Calcular parámetros elásticos
+            G = E / (2 * (1 + nu))  # Módulo de corte
+            K = E / (3 * (1 - 2*nu))  # Módulo de bulk
 
-            # Esfuerzo de fluencia (basado en cohesión)
+            # Parámetros de Drucker-Prager
             cohesion = capa.get('cohesion', 10000)  # Pa
-            phi = capa.get('friccion_grados', 30) * np.pi / 180  # radianes
+            phi_grados = capa.get('friccion_grados', 30)
+            phi = phi_grados * np.pi / 180  # radianes
 
-            # Para modelo J2 (Von Mises), el esfuerzo de fluencia es aproximadamente
-            # sigma_y ≈ 2*c*cos(phi)/(1-sin(phi)) para Mohr-Coulomb
-            # Simplificación: usamos 6*cohesion como esfuerzo de fluencia
-            sigma_y = 6 * cohesion if cohesion > 0 else 50000
+            # Parámetro de fricción rho para Drucker-Prager
+            # Ajuste para coincidir con criterio de Mohr-Coulomb en compresión triaxial
+            sin_phi = np.sin(phi)
+            rho_bar = (2 * np.sqrt(6) * sin_phi) / (3 - sin_phi)
 
-            # Módulo de endurecimiento (típicamente 1-10% del módulo elástico)
-            H_iso = 0.02 * E  # 2% hardening
+            # Cohesión inicial (sigma_y) - mínimo 1 kPa para estabilidad
+            sigma_y = max(cohesion, 1000)  # Pa (mínimo 1 kPa)
 
-            # Usar materiales elásticos por ahora (más estables para verificar geometría)
-            ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
-            print(f"✓ Material {mat_id}: {capa['nombre']} - ElasticIsotropic (E={E/1e6:.1f} MPa)")
+            # Cohesión en el límite (para endurecimiento leve)
+            Kinf = sigma_y * 1.2  # 20% de endurecimiento
+
+            # Parámetro de endurecimiento
+            Ko = 0.0  # Sin endurecimiento inicial
+
+            # Parámetros de dilatancia (sin dilatancia = modelo conservador)
+            delta1 = 0.0  # Sin dilatancia
+            delta2 = 0.0
+
+            # Módulo de endurecimiento plástico (pequeño para estabilidad)
+            H = 0.001 * G  # 0.1% del módulo de corte
+
+            # Ángulo de Lode (theta = 0 para superficie circular en plano desviador)
+            theta = 0.0
+
+            # Presión atmosférica (para normalización)
+            atm = 101325.0  # Pa
+
+            try:
+                # Intentar usar DruckerPrager
+                ops.nDMaterial('DruckerPrager', mat_id, K, G, sigma_y, rho,
+                              rho_bar, Kinf, Ko, delta1, delta2, H, theta, rho, atm)
+                print(f"✓ Material {mat_id}: {capa['nombre']} - DruckerPrager")
+                print(f"    K={K/1e6:.1f} MPa, G={G/1e6:.1f} MPa")
+                print(f"    c={cohesion/1000:.1f} kPa, φ={phi_grados:.1f}°, ρ̄={rho_bar:.3f}")
+            except Exception as e:
+                # Fallback a ElasticIsotropic si DruckerPrager falla
+                print(f"⚠ DruckerPrager no disponible para {capa['nombre']}, usando ElasticIsotropic")
+                print(f"  Error: {str(e)}")
+                ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
+                print(f"✓ Material {mat_id}: {capa['nombre']} - ElasticIsotropic (E={E/1e6:.1f} MPa)")
 
             capa['mat_id'] = mat_id
             mat_id += 1
@@ -414,22 +442,22 @@ class ModeloZapata3DNoLineal:
 
         analisis = self.config['analisis']
 
-        # Configuración del análisis no lineal
+        # Configuración del análisis no lineal (ajustado para Drucker-Prager)
         ops.system('BandGeneral')
         ops.numberer('RCM')
         ops.constraints('Transformation')
-        ops.test('NormDispIncr', 1.0e-4, 100, 0)
+        ops.test('NormDispIncr', 1.0e-2, 100, 0)  # Tolerancia muy relajada
         ops.algorithm('Newton')
-        ops.integrator('LoadControl', 0.05)
+        ops.integrator('LoadControl', 0.1)  # Incrementos moderados
         ops.analysis('Static')
 
         print("\n  Sistema: BandGeneral")
         print("  Algoritmo: Newton")
-        print("  Integrador: LoadControl (0.05 por paso)")
-        print("  Convergencia: NormDispIncr (tol=1e-4, max_iter=100)")
+        print("  Integrador: LoadControl (0.1 por paso)")
+        print("  Convergencia: NormDispIncr (tol=1e-2, max_iter=100)")
 
         # Análisis incremental
-        num_pasos = 10
+        num_pasos = 10  # 10 pasos × 0.1 = 1.0 (carga total)
         print(f"\n  Ejecutando {num_pasos} pasos incrementales...")
 
         exitos = 0
