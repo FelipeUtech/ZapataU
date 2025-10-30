@@ -1,0 +1,111 @@
+{
+  "geometria": {
+    "zapata": {
+      "ancho_x": 2.5,
+      "ancho_y": 2.5,
+      "espesor": 0.6,
+      "comentario": "Dimensiones de la zapata en metros"
+    },
+    "pedestal": {
+      "ancho_x": 0.5,
+      "ancho_y": 0.5,
+      "altura": 0.5,
+      "comentario": "Pedestal que sobresale 0.5 m sobre la zapata"
+    },
+    "profundidad_desplante": 1.5,
+    "comentario_profundidad": "Profundidad Df desde la superficie hasta la base de la zapata en metros"
+  },
+  "materiales": {
+    "concreto_zapata": {
+      "E": 2.5e10,
+      "nu": 0.2,
+      "densidad": 2400,
+      "fc": 28e6,
+      "comentario": "Módulo de Young en Pa, Poisson, densidad en kg/m3, fc en Pa"
+    },
+    "concreto_pedestal": {
+      "E": 2.5e10,
+      "nu": 0.2,
+      "densidad": 2400,
+      "fc": 28e6
+    },
+    "lleno": {
+      "E": 1.5e7,
+      "nu": 0.3,
+      "densidad": 1800,
+      "cohesion": 10000,
+      "friccion_grados": 30,
+      "comentario": "Material de relleno sobre la zapata"
+    }
+  },
+  "suelo_estratificado": {
+    "comentario": "Capas de suelo desde la base de la zapata hacia abajo",
+    "capas": [
+      {
+        "numero": 1,
+        "nombre": "Arcilla blanda",
+        "espesor": 2.0,
+        "E": 1.0e7,
+        "nu": 0.35,
+        "densidad": 1700,
+        "cohesion": 20000,
+        "friccion_grados": 15,
+        "comentario": "Primera capa bajo la zapata"
+      },
+      {
+        "numero": 2,
+        "nombre": "Arena limosa",
+        "espesor": 3.0,
+        "E": 3.0e7,
+        "nu": 0.3,
+        "densidad": 1900,
+        "cohesion": 5000,
+        "friccion_grados": 32,
+        "comentario": "Segunda capa"
+      },
+      {
+        "numero": 3,
+        "nombre": "Grava arenosa",
+        "espesor": 5.0,
+        "E": 8.0e7,
+        "nu": 0.25,
+        "densidad": 2100,
+        "cohesion": 0,
+        "friccion_grados": 38,
+        "comentario": "Tercera capa - capa más rígida"
+      }
+    ]
+  },
+  "cargas": {
+    "carga_vertical": 500000,
+    "carga_horizontal_x": 50000,
+    "carga_horizontal_y": 0,
+    "momento_x": 100000,
+    "momento_y": 0,
+    "comentario": "Cargas en Newtons y Newton-metro aplicadas en la parte superior del pedestal"
+  },
+  "mallado": {
+    "elementos_zapata_x": 8,
+    "elementos_zapata_y": 8,
+    "elementos_zapata_z": 3,
+    "elementos_suelo_x": 12,
+    "elementos_suelo_y": 12,
+    "elementos_por_capa": 4,
+    "comentario": "Número de elementos para discretización"
+  },
+  "analisis": {
+    "tipo": "estatico",
+    "gravedad": 9.81,
+    "num_pasos": 10,
+    "tolerancia": 1e-6,
+    "max_iteraciones": 100,
+    "comentario": "Parámetros de análisis. Tipo puede ser 'estatico' o 'dinamico'"
+  },
+  "salida": {
+    "carpeta": "resultados",
+    "guardar_desplazamientos": true,
+    "guardar_reacciones": true,
+    "guardar_presiones": true,
+    "graficar": true
+  }
+}
