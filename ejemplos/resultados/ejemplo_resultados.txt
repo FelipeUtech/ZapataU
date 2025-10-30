@@ -1,0 +1,26 @@
+============================================================
+RESULTADOS DEL ANÁLISIS - MODELO SIMPLIFICADO
+============================================================
+
+Fecha: 2025-10-30 05:32:26
+
+DESPLAZAMIENTOS EN PUNTO DE CARGA (top del pedestal):
+  Horizontal X: 12.554 mm
+  Horizontal Y: -12.298 mm
+  Vertical (asentamiento): 29.042 mm
+  Rotación X: 11.328 mrad
+  Rotación Y: 6.173 mrad
+
+DESPLAZAMIENTOS EN BASE DE ZAPATA:
+  Horizontal X: 5.800 mm
+  Horizontal Y: 0.000 mm
+  Vertical (asentamiento): 29.000 mm
+  Rotación X: 11.136 mrad
+  Rotación Y: 6.125 mrad
+
+REACCIONES EN LA BASE:
+  Rx: -0.00 kN
+  Ry: -0.00 kN
+  Rz: -0.00 kN
+  Mx: -0.00 kN·m
+  My: -0.00 kN·m

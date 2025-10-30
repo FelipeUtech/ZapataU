@@ -19,6 +19,13 @@ Este proyecto implementa un modelo tridimensional de una zapata apoyada en suelo
 - Interacción suelo-estructura
 - Análisis estático y dinámico disponible
 - Configuración paramétrica mediante archivo JSON
+- Dos versiones disponibles: modelo 3D completo y modelo simplificado
+
+## Ejemplo de Resultados
+
+![Resultados del Modelo](ejemplos/resultados/graficas_modelo_zapata.png)
+
+*Ejemplo de análisis con carga vertical de 500 kN mostrando asentamiento de 29 mm*
 
 ## Requisitos
 
@@ -35,34 +42,53 @@ pip install -r requirements.txt
 
 ## Uso
 
-### Ejecución básica
+### Modelo Simplificado (Recomendado)
+
+El modelo simplificado usa resortes equivalentes para representar el suelo estratificado. Es más robusto y eficiente computacionalmente.
 
 ```bash
+# Ejecutar modelo simplificado
+python opensees_zapata_simple.py
+
+# Generar visualizaciones
+python visualizar_simple.py
+```
+
+### Modelo 3D Completo
+
+Modelo con elementos sólidos brick para todos los componentes.
+
+```bash
+# Ejecutar modelo 3D completo
 python opensees_zapata_model.py
+
+# Visualizar resultados
+python visualizar_resultados.py
 ```
 
 ### Ejecución con configuración personalizada
 
 ```bash
-python opensees_zapata_model.py --config mi_configuracion.json
-```
-
-### Visualización de resultados
-
-```bash
-python visualizar_resultados.py
+python opensees_zapata_simple.py --config mi_configuracion.json
 ```
 
 ## Estructura del Proyecto
 
 ```
 ZapataU/
-├── README.md                    # Este archivo
-├── requirements.txt             # Dependencias de Python
-├── config_zapata.json          # Configuración del modelo
-├── opensees_zapata_model.py    # Script principal del modelo
-├── visualizar_resultados.py    # Script de visualización
-└── resultados/                 # Carpeta para resultados (creada automáticamente)
+├── README.md                      # Este archivo
+├── requirements.txt               # Dependencias de Python
+├── config_zapata.json            # Configuración del modelo
+├── opensees_zapata_simple.py     # Modelo simplificado (recomendado)
+├── opensees_zapata_model.py      # Modelo 3D completo
+├── visualizar_simple.py          # Visualización modelo simplificado
+├── visualizar_resultados.py      # Visualización modelo 3D
+├── ejemplo_ejecucion.sh          # Script de ejemplo
+├── ejemplos/                     # Ejemplos de resultados
+│   └── resultados/
+│       ├── graficas_modelo_zapata.png
+│       └── ejemplo_resultados.txt
+└── resultados/                   # Carpeta para resultados (auto-generada)
 ```
 
 ## Configuración del Modelo
