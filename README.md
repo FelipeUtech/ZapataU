@@ -16,10 +16,11 @@ Este proyecto implementa un modelo tridimensional de una zapata apoyada en suelo
 
 - Modelado 3D con elementos finitos
 - Suelo modelado con elementos sólidos y resortes no lineales
-- Interacción suelo-estructura
-- Análisis estático y dinámico disponible
+- Materiales no lineales (J2 Plasticity) para comportamiento elastoplástico del suelo
+- Interacción suelo-estructura con conectividad correcta
+- Análisis estático no lineal incremental
 - Configuración paramétrica mediante archivo JSON
-- Dos versiones disponibles: modelo 3D completo y modelo simplificado
+- Tres versiones disponibles: modelo simplificado, modelo 3D lineal, y **modelo 3D no lineal**
 
 ## Ejemplo de Resultados
 
@@ -42,9 +43,9 @@ pip install -r requirements.txt
 
 ## Uso
 
-### Modelo Simplificado (Recomendado)
+### Modelo Simplificado (Para diseño preliminar)
 
-El modelo simplificado usa resortes equivalentes para representar el suelo estratificado. Es más robusto y eficiente computacionalmente.
+El modelo simplificado usa resortes equivalentes para representar el suelo estratificado. Es rápido y robusto.
 
 ```bash
 # Ejecutar modelo simplificado
@@ -54,41 +55,65 @@ python opensees_zapata_simple.py
 python visualizar_simple.py
 ```
 
-### Modelo 3D Completo
+**Resultado típico:** Asentamiento ~ 29 mm (sin confinamiento lateral)
 
-Modelo con elementos sólidos brick para todos los componentes.
+### Modelo 3D No Lineal (Recomendado para diseño detallado) ⭐
+
+Modelo con materiales no lineales (J2 Plasticity) y conectividad correcta entre componentes.
 
 ```bash
-# Ejecutar modelo 3D completo
-python opensees_zapata_model.py
+# Ejecutar modelo 3D no lineal
+python opensees_zapata_3d_nolineal.py
+```
 
-# Visualizar resultados
-python visualizar_resultados.py
+**Características:**
+- ✅ Materiales elastoplásticos para suelo
+- ✅ Conectividad correcta (nodos compartidos)
+- ✅ Análisis no lineal incremental
+- ✅ Confinamiento lateral
+
+**Resultado típico:** Asentamiento ~ 4.6 mm (con confinamiento 3D)
+
+### Modelo 3D Lineal (Versión antigua - en desarrollo)
+
+Modelo con elementos sólidos brick y materiales elásticos.
+
+```bash
+# Ejecutar modelo 3D lineal (puede tener problemas de convergencia)
+python opensees_zapata_model.py
 ```
 
 ### Ejecución con configuración personalizada
 
 ```bash
-python opensees_zapata_simple.py --config mi_configuracion.json
+python opensees_zapata_3d_nolineal.py --config mi_configuracion.json
 ```
 
 ## Estructura del Proyecto
 
 ```
 ZapataU/
-├── README.md                      # Este archivo
-├── requirements.txt               # Dependencias de Python
-├── config_zapata.json            # Configuración del modelo
-├── opensees_zapata_simple.py     # Modelo simplificado (recomendado)
-├── opensees_zapata_model.py      # Modelo 3D completo
-├── visualizar_simple.py          # Visualización modelo simplificado
-├── visualizar_resultados.py      # Visualización modelo 3D
-├── ejemplo_ejecucion.sh          # Script de ejemplo
-├── ejemplos/                     # Ejemplos de resultados
+├── README.md                        # Este archivo
+├── requirements.txt                 # Dependencias de Python
+├── config_zapata.json              # Configuración del modelo
+│
+├── opensees_zapata_3d_nolineal.py  # ⭐ Modelo 3D no lineal (RECOMENDADO)
+├── opensees_zapata_simple.py       # Modelo simplificado con resortes
+├── opensees_zapata_model.py        # Modelo 3D lineal (en desarrollo)
+│
+├── visualizar_simple.py            # Visualización modelo simplificado
+├── visualizar_resultados.py        # Visualización modelo 3D
+├── verificar_rigideces.py          # Verificación de cálculos
+│
+├── MODELO_3D_NOLINEAL.md           # Documentación modelo 3D
+├── MEMORIA_CALCULO_RIGIDECES.md    # Memoria de cálculo
+│
+├── ejemplo_ejecucion.sh            # Script de ejemplo
+├── ejemplos/                       # Ejemplos de resultados
 │   └── resultados/
 │       ├── graficas_modelo_zapata.png
 │       └── ejemplo_resultados.txt
-└── resultados/                   # Carpeta para resultados (auto-generada)
+└── resultados/                     # Carpeta para resultados (auto-generada)
 ```
 
 ## Configuración del Modelo
