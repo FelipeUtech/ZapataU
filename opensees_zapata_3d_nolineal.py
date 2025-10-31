@@ -398,17 +398,143 @@ class ModeloZapata3DNoLineal:
 
         print(f"  ✓ {nodos_confinados} nodos con restricciones laterales")
 
-    def aplicar_cargas(self):
-        """Aplica cargas sobre la zapata"""
+    def calcular_cargas_gravedad(self):
+        """Calcula fuerzas de gravedad basadas en volumen y densidad de elementos"""
+        g = 9.81  # m/s²
+        cargas_gravedad = {}  # {node_id: fuerza_z}
+
+        # Procesar elementos del suelo
+        capas = self.config['suelo_estratificado']['capas']
+        elem_por_capa = self.nz_suelo_estratificado // len(capas)
+
+        i_min = self.i_start_zap
+        i_max = self.i_start_zap + self.nx_zap
+        j_min = self.j_start_zap
+        j_max = self.j_start_zap + self.ny_zap
+        k_min_zap = self.nz_suelo_estratificado
+        k_max_zap = k_min_zap + self.nz_zap
+
+        for k in range(self.nz_suelo):
+            for j in range(self.ny_suelo):
+                for i in range(self.nx_suelo):
+                    # Verificar si está en región de zapata (skip)
+                    en_region_zapata = (k >= k_min_zap and k < k_max_zap and
+                                       i >= i_min and i < i_max and
+                                       j >= j_min and j < j_max)
+                    if en_region_zapata:
+                        continue
+
+                    # Obtener nodos del elemento
+                    try:
+                        n1 = self.nodos['suelo'][(i, j, k)]
+                        n2 = self.nodos['suelo'][(i+1, j, k)]
+                        n3 = self.nodos['suelo'][(i+1, j+1, k)]
+                        n4 = self.nodos['suelo'][(i, j+1, k)]
+                        n5 = self.nodos['suelo'][(i, j, k+1)]
+                        n6 = self.nodos['suelo'][(i+1, j, k+1)]
+                        n7 = self.nodos['suelo'][(i+1, j+1, k+1)]
+                        n8 = self.nodos['suelo'][(i, j+1, k+1)]
+                    except KeyError:
+                        continue
+
+                    # Calcular volumen del elemento (brick)
+                    # Coordenadas de los nodos
+                    coord_n1 = [ops.nodeCoord(n1, dim+1) for dim in range(3)]
+                    coord_n7 = [ops.nodeCoord(n7, dim+1) for dim in range(3)]
+                    dx = abs(coord_n7[0] - coord_n1[0])
+                    dy = abs(coord_n7[1] - coord_n1[1])
+                    dz = abs(coord_n7[2] - coord_n1[2])
+                    volumen = dx * dy * dz
+
+                    # Obtener densidad del material
+                    if k < self.nz_suelo_estratificado:
+                        capa_idx = min(k // elem_por_capa, len(capas) - 1)
+                        rho = capas[capa_idx]['densidad']
+                    else:
+                        rho = self.config['materiales']['lleno']['densidad']
+
+                    # Fuerza de gravedad del elemento
+                    peso = rho * volumen * g  # N
+
+                    # Distribuir entre 8 nodos (1/8 cada uno)
+                    fuerza_por_nodo = peso / 8
+
+                    for nodo in [n1, n2, n3, n4, n5, n6, n7, n8]:
+                        if nodo not in cargas_gravedad:
+                            cargas_gravedad[nodo] = 0.0
+                        cargas_gravedad[nodo] += fuerza_por_nodo
+
+        # Procesar elementos de la zapata
+        rho_conc = self.config['materiales']['concreto_zapata']['densidad']
+
+        for k in range(self.nz_zap):
+            for j in range(self.ny_zap):
+                for i in range(self.nx_zap):
+                    n1 = self.nodos['zapata'][(i, j, k)]
+                    n2 = self.nodos['zapata'][(i+1, j, k)]
+                    n3 = self.nodos['zapata'][(i+1, j+1, k)]
+                    n4 = self.nodos['zapata'][(i, j+1, k)]
+                    n5 = self.nodos['zapata'][(i, j, k+1)]
+                    n6 = self.nodos['zapata'][(i+1, j, k+1)]
+                    n7 = self.nodos['zapata'][(i+1, j+1, k+1)]
+                    n8 = self.nodos['zapata'][(i, j+1, k+1)]
+
+                    # Calcular volumen
+                    coord_n1 = [ops.nodeCoord(n1, dim+1) for dim in range(3)]
+                    coord_n7 = [ops.nodeCoord(n7, dim+1) for dim in range(3)]
+                    dx = abs(coord_n7[0] - coord_n1[0])
+                    dy = abs(coord_n7[1] - coord_n1[1])
+                    dz = abs(coord_n7[2] - coord_n1[2])
+                    volumen = dx * dy * dz
+
+                    # Fuerza de gravedad
+                    peso = rho_conc * volumen * g  # N
+                    fuerza_por_nodo = peso / 8
+
+                    for nodo in [n1, n2, n3, n4, n5, n6, n7, n8]:
+                        if nodo not in cargas_gravedad:
+                            cargas_gravedad[nodo] = 0.0
+                        cargas_gravedad[nodo] += fuerza_por_nodo
+
+        return cargas_gravedad
+
+    def aplicar_cargas_gravedad(self):
+        """Aplica solo las cargas de gravedad (Fase 1)"""
         print("\n" + "-"*60)
-        print("APLICANDO CARGAS")
+        print("CONFIGURANDO PATTERN 1: GRAVEDAD")
         print("-"*60)
 
-        cargas = self.config['cargas']
-
-        # Aplicar carga distribuida en la parte superior de la zapata
+        # PATTERN 1: CARGA DE GRAVEDAD (peso propio)
         ops.timeSeries('Linear', 1)
         ops.pattern('Plain', 1, 1)
+
+        # Calcular y aplicar fuerzas de gravedad
+        print("  Calculando fuerzas de gravedad...")
+        cargas_gravedad = self.calcular_cargas_gravedad()
+
+        # Aplicar fuerzas de gravedad (negativas, hacia abajo)
+        for nodo, fuerza in cargas_gravedad.items():
+            ops.load(nodo, 0.0, 0.0, -fuerza)  # Negativo = hacia abajo
+
+        peso_total = sum(cargas_gravedad.values()) / 1000  # kN
+        print(f"  ✓ Cargas de gravedad aplicadas en {len(cargas_gravedad)} nodos")
+        print(f"  ✓ Peso total del sistema: {peso_total:.2f} kN")
+
+        # Guardar nodos de referencia
+        i_central = self.nx_zap // 2
+        j_central = self.ny_zap // 2
+        self.nodo_carga = self.nodos['zapata'][(i_central, j_central, self.nz_zap)]
+        self.nodo_base_central = self.nodos['zapata'][(i_central, j_central, 0)]
+
+    def aplicar_cargas_externas(self):
+        """Aplica las cargas externas (Fase 2) - se llama DESPUÉS de loadConst"""
+        print("\n" + "-"*60)
+        print("CONFIGURANDO PATTERN 2: CARGA APLICADA")
+        print("-"*60)
+
+        # PATTERN 2: CARGA APLICADA (1000 kN en 10 pasos)
+        ops.timeSeries('Linear', 2)
+        ops.pattern('Plain', 2, 2)
 
         # Nodos en la parte superior de la zapata
         nodos_top = []
@@ -417,62 +543,103 @@ class ModeloZapata3DNoLineal:
                 nodos_top.append(node)
 
         # Distribuir carga uniformemente
-        P_total = cargas['carga_vertical']
-        F_x = cargas['carga_horizontal_x']
+        P_total = 1000000  # 1000 kN = 1,000,000 N
+        F_x = 0  # Sin carga horizontal por ahora
         num_nodos = len(nodos_top)
 
         P_por_nodo = P_total / num_nodos
         F_x_por_nodo = F_x / num_nodos
 
         for node in nodos_top:
-            ops.load(node, F_x_por_nodo, 0.0, P_por_nodo)
+            ops.load(node, F_x_por_nodo, 0.0, -P_por_nodo)  # Negativo = hacia abajo
 
         print(f"  ✓ Carga vertical total: {P_total/1000:.1f} kN")
         print(f"  ✓ Carga horizontal total: {F_x/1000:.1f} kN")
         print(f"  ✓ Distribuida en {num_nodos} nodos ({P_por_nodo/1000:.2f} kN/nodo)")
 
-        # Guardar nodo central superior para resultados
-        i_central = self.nx_zap // 2
-        j_central = self.ny_zap // 2
-        self.nodo_carga = self.nodos['zapata'][(i_central, j_central, self.nz_zap)]
-
     def analizar_no_lineal(self):
-        """Ejecuta análisis no lineal incremental"""
+        """Ejecuta análisis no lineal en dos fases: gravedad + carga aplicada"""
         print("\n" + "="*60)
-        print("ANÁLISIS NO LINEAL")
+        print("ANÁLISIS NO LINEAL EN DOS FASES")
         print("="*60)
 
-        analisis = self.config['analisis']
-
-        # Configuración del análisis (ajustado para modelo elástico)
+        # Configuración del análisis
         ops.system('BandGeneral')
         ops.numberer('RCM')
         ops.constraints('Transformation')
         ops.test('NormDispIncr', 1.0e-6, 50, 0)
         ops.algorithm('Newton')
-        ops.integrator('LoadControl', 0.1)
         ops.analysis('Static')
 
         print("\n  Sistema: BandGeneral")
         print("  Algoritmo: Newton")
-        print("  Integrador: LoadControl (0.1 por paso)")
         print("  Convergencia: NormDispIncr (tol=1e-6, max_iter=50)")
-
-        # Análisis incremental con registro de historia
-        num_pasos = 10  # 10 pasos × 0.1 = 1.0 (carga total)
-        print(f"\n  Ejecutando {num_pasos} pasos incrementales...")
 
         # Listas para historia carga-desplazamiento
         self.historia_carga = []
         self.historia_despl = []
+        self.historia_fase = []  # 1 = gravedad, 2 = carga aplicada
 
-        # Nodo central en la base de la zapata
-        i_central = self.nx_zap // 2
-        j_central = self.ny_zap // 2
-        nodo_base_central = self.nodos['zapata'][(i_central, j_central, 0)]
+        # ============================================================
+        # FASE 1: ANÁLISIS DE GRAVEDAD
+        # ============================================================
+        print("\n" + "="*60)
+        print("FASE 1: ANÁLISIS DE CARGA DE GRAVEDAD")
+        print("="*60)
 
-        # Carga total aplicada
-        P_total = self.config['cargas']['carga_vertical']
+        # En la fase 1, solo el pattern 1 (gravedad) está activo
+        # Aplicar gravedad en un solo paso (o varios pasos pequeños)
+        ops.integrator('LoadControl', 1.0)  # Aplicar 100% de la gravedad
+
+        print("\n  Aplicando gravedad (Pattern 1)...")
+
+        # Intentar analizar
+        ok = ops.analyze(1)
+
+        if ok != 0:
+            print("  ⚠ Fallo con Newton, intentando ModifiedNewton...")
+            ops.algorithm('ModifiedNewton', '-initial')
+            ok = ops.analyze(1)
+
+            if ok == 0:
+                print("  ✓ Convergió con ModifiedNewton")
+                ops.algorithm('Newton')  # Volver a Newton
+            else:
+                print("  ✗ No convergió en fase de gravedad")
+                return False
+
+        # Registrar estado después de gravedad
+        despl_gravedad = ops.nodeDisp(self.nodo_base_central)[2] * 1000  # mm
+        self.historia_carga.append(0.0)  # Carga externa = 0
+        self.historia_despl.append(despl_gravedad)
+        self.historia_fase.append(1)
+
+        print(f"  ✓ Gravedad aplicada exitosamente")
+        print(f"  ✓ Desplazamiento por gravedad: {despl_gravedad:.4f} mm")
+
+        # Mantener la carga de gravedad constante para la siguiente fase
+        ops.loadConst('-time', 0.0)
+        print(f"  ✓ Cargas de gravedad congeladas con loadConst")
+
+        # ============================================================
+        # FASE 2: ANÁLISIS DE CARGA APLICADA (1000 kN en 10 pasos)
+        # ============================================================
+        print("\n" + "="*60)
+        print("FASE 2: ANÁLISIS DE CARGA APLICADA (0 → 1000 kN)")
+        print("="*60)
+
+        # Aplicar cargas externas DESPUÉS de loadConst
+        self.aplicar_cargas_externas()
+
+        # Configurar integrador para carga incremental
+        # 10 pasos × 0.1 = 1.0 (factor de carga completo)
+        ops.integrator('LoadControl', 0.1)
+
+        num_pasos = 10
+        P_total = 1000  # kN
+
+        print(f"\n  Aplicando carga en {num_pasos} incrementos de {P_total/num_pasos:.1f} kN")
+        print(f"  Pattern activo: Pattern 2 (carga aplicada)")
 
         exitos = 0
         for step in range(num_pasos):
@@ -482,16 +649,17 @@ class ModeloZapata3DNoLineal:
                 exitos += 1
                 # Registrar carga y desplazamiento
                 factor_carga = (step + 1) * 0.1
-                carga_actual = P_total * factor_carga / 1000  # kN
-                despl = ops.nodeDisp(nodo_base_central)[2] * 1000  # mm
+                carga_actual = P_total * factor_carga  # kN
+                despl = ops.nodeDisp(self.nodo_base_central)[2] * 1000  # mm
 
                 self.historia_carga.append(carga_actual)
                 self.historia_despl.append(despl)
+                self.historia_fase.append(2)
 
                 if (step + 1) % 2 == 0:
                     print(f"    Paso {step+1}/{num_pasos}: ✓ (Carga={carga_actual:.1f} kN, Despl={despl:.3f} mm)")
             else:
-                print(f"    Paso {step+1}/{num_pasos}: Intentando con algoritmo modificado...")
+                print(f"    Paso {step+1}/{num_pasos}: ⚠ Intentando con algoritmo modificado...")
                 # Intentar con Modified Newton
                 ops.algorithm('ModifiedNewton', '-initial')
                 ok = ops.analyze(1)
@@ -499,20 +667,26 @@ class ModeloZapata3DNoLineal:
                     exitos += 1
                     # Registrar carga y desplazamiento
                     factor_carga = (step + 1) * 0.1
-                    carga_actual = P_total * factor_carga / 1000  # kN
-                    despl = ops.nodeDisp(nodo_base_central)[2] * 1000  # mm
+                    carga_actual = P_total * factor_carga  # kN
+                    despl = ops.nodeDisp(self.nodo_base_central)[2] * 1000  # mm
 
                     self.historia_carga.append(carga_actual)
                     self.historia_despl.append(despl)
+                    self.historia_fase.append(2)
 
-                    print(f"    Paso {step+1}/{num_pasos}: ✓ (ModifiedNewton)")
+                    print(f"    Paso {step+1}/{num_pasos}: ✓ (ModifiedNewton, Carga={carga_actual:.1f} kN)")
                     ops.algorithm('Newton')  # Volver a Newton
                 else:
                     print(f"    Paso {step+1}/{num_pasos}: ✗ No convergió")
                     break
 
-        print(f"\n  ✓ {exitos}/{num_pasos} pasos completados exitosamente")
-        print(f"  ✓ Historia carga-desplazamiento registrada ({len(self.historia_carga)} puntos)")
+        print(f"\n" + "="*60)
+        print(f"RESUMEN DEL ANÁLISIS")
+        print("="*60)
+        print(f"  Fase 1 (Gravedad): Completada")
+        print(f"  Fase 2 (Carga aplicada): {exitos}/{num_pasos} pasos completados")
+        print(f"  Historia registrada: {len(self.historia_carga)} puntos")
+
         return exitos > 0
 
     def extraer_resultados(self):
@@ -616,8 +790,8 @@ class ModeloZapata3DNoLineal:
             self.crear_malla_unificada()
             self.crear_elementos()
             self.aplicar_condiciones_frontera()
-            self.aplicar_cargas()
-            exito = self.analizar_no_lineal()
+            self.aplicar_cargas_gravedad()  # Solo gravedad en Fase 1
+            exito = self.analizar_no_lineal()  # Esto aplicará cargas externas en Fase 2
 
             if exito:
                 self.extraer_resultados()
