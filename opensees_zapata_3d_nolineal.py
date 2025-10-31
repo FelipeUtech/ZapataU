@@ -20,6 +20,7 @@ import os
 import sys
 import argparse
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 
 class ModeloZapata3DNoLineal:
@@ -121,19 +122,20 @@ class ModeloZapata3DNoLineal:
             # Presión atmosférica (para normalización)
             atm = 101325.0  # Pa
 
-            try:
-                # Intentar usar DruckerPrager
-                ops.nDMaterial('DruckerPrager', mat_id, K, G, sigma_y, rho,
-                              rho_bar, Kinf, Ko, delta1, delta2, H, theta, rho, atm)
-                print(f"✓ Material {mat_id}: {capa['nombre']} - DruckerPrager")
-                print(f"    K={K/1e6:.1f} MPa, G={G/1e6:.1f} MPa")
-                print(f"    c={cohesion/1000:.1f} kPa, φ={phi_grados:.1f}°, ρ̄={rho_bar:.3f}")
-            except Exception as e:
-                # Fallback a ElasticIsotropic si DruckerPrager falla
-                print(f"⚠ DruckerPrager no disponible para {capa['nombre']}, usando ElasticIsotropic")
-                print(f"  Error: {str(e)}")
-                ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
-                print(f"✓ Material {mat_id}: {capa['nombre']} - ElasticIsotropic (E={E/1e6:.1f} MPa)")
+            # Usar modelo elástico para análisis rápido
+            ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
+            print(f"✓ Material {mat_id}: {capa['nombre']} - ElasticIsotropic (E={E/1e6:.1f} MPa)")
+
+            # Para usar DruckerPrager, descomentar:
+            # try:
+            #     ops.nDMaterial('DruckerPrager', mat_id, K, G, sigma_y, rho,
+            #                   rho_bar, Kinf, Ko, delta1, delta2, H, theta, rho, atm)
+            #     print(f"✓ Material {mat_id}: {capa['nombre']} - DruckerPrager")
+            #     print(f"    K={K/1e6:.1f} MPa, G={G/1e6:.1f} MPa")
+            #     print(f"    c={cohesion/1000:.1f} kPa, φ={phi_grados:.1f}°, ρ̄={rho_bar:.3f}")
+            # except Exception as e:
+            #     print(f"⚠ DruckerPrager falló, usando ElasticIsotropic")
+            #     ops.nDMaterial('ElasticIsotropic', mat_id, E, nu, rho)
 
             capa['mat_id'] = mat_id
             mat_id += 1
@@ -442,23 +444,35 @@ class ModeloZapata3DNoLineal:
 
         analisis = self.config['analisis']
 
-        # Configuración del análisis no lineal (ajustado para Drucker-Prager)
+        # Configuración del análisis (ajustado para modelo elástico)
         ops.system('BandGeneral')
         ops.numberer('RCM')
         ops.constraints('Transformation')
-        ops.test('NormDispIncr', 1.0e-2, 100, 0)  # Tolerancia muy relajada
+        ops.test('NormDispIncr', 1.0e-6, 50, 0)
         ops.algorithm('Newton')
-        ops.integrator('LoadControl', 0.1)  # Incrementos moderados
+        ops.integrator('LoadControl', 0.1)
         ops.analysis('Static')
 
         print("\n  Sistema: BandGeneral")
         print("  Algoritmo: Newton")
         print("  Integrador: LoadControl (0.1 por paso)")
-        print("  Convergencia: NormDispIncr (tol=1e-2, max_iter=100)")
+        print("  Convergencia: NormDispIncr (tol=1e-6, max_iter=50)")
 
-        # Análisis incremental
+        # Análisis incremental con registro de historia
         num_pasos = 10  # 10 pasos × 0.1 = 1.0 (carga total)
         print(f"\n  Ejecutando {num_pasos} pasos incrementales...")
+
+        # Listas para historia carga-desplazamiento
+        self.historia_carga = []
+        self.historia_despl = []
+
+        # Nodo central en la base de la zapata
+        i_central = self.nx_zap // 2
+        j_central = self.ny_zap // 2
+        nodo_base_central = self.nodos['zapata'][(i_central, j_central, 0)]
+
+        # Carga total aplicada
+        P_total = self.config['cargas']['carga_vertical']
 
         exitos = 0
         for step in range(num_pasos):
@@ -466,8 +480,16 @@ class ModeloZapata3DNoLineal:
 
             if ok == 0:
                 exitos += 1
+                # Registrar carga y desplazamiento
+                factor_carga = (step + 1) * 0.1
+                carga_actual = P_total * factor_carga / 1000  # kN
+                despl = ops.nodeDisp(nodo_base_central)[2] * 1000  # mm
+
+                self.historia_carga.append(carga_actual)
+                self.historia_despl.append(despl)
+
                 if (step + 1) % 2 == 0:
-                    print(f"    Paso {step+1}/{num_pasos}: ✓")
+                    print(f"    Paso {step+1}/{num_pasos}: ✓ (Carga={carga_actual:.1f} kN, Despl={despl:.3f} mm)")
             else:
                 print(f"    Paso {step+1}/{num_pasos}: Intentando con algoritmo modificado...")
                 # Intentar con Modified Newton
@@ -475,6 +497,14 @@ class ModeloZapata3DNoLineal:
                 ok = ops.analyze(1)
                 if ok == 0:
                     exitos += 1
+                    # Registrar carga y desplazamiento
+                    factor_carga = (step + 1) * 0.1
+                    carga_actual = P_total * factor_carga / 1000  # kN
+                    despl = ops.nodeDisp(nodo_base_central)[2] * 1000  # mm
+
+                    self.historia_carga.append(carga_actual)
+                    self.historia_despl.append(despl)
+
                     print(f"    Paso {step+1}/{num_pasos}: ✓ (ModifiedNewton)")
                     ops.algorithm('Newton')  # Volver a Newton
                 else:
@@ -482,6 +512,7 @@ class ModeloZapata3DNoLineal:
                     break
 
         print(f"\n  ✓ {exitos}/{num_pasos} pasos completados exitosamente")
+        print(f"  ✓ Historia carga-desplazamiento registrada ({len(self.historia_carga)} puntos)")
         return exitos > 0
 
     def extraer_resultados(self):
@@ -527,6 +558,51 @@ class ModeloZapata3DNoLineal:
 
         print(f"\n  ✓ Resultados guardados en: {archivo}")
 
+    def graficar_carga_desplazamiento(self):
+        """Genera gráfica de carga vs desplazamiento"""
+        if not hasattr(self, 'historia_carga') or len(self.historia_carga) == 0:
+            print("\n⚠ No hay datos de historia carga-desplazamiento para graficar")
+            return
+
+        print("\n" + "="*60)
+        print("GENERANDO GRÁFICA CARGA-DESPLAZAMIENTO")
+        print("="*60)
+
+        # Crear figura
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.historia_despl, self.historia_carga, 'b-o', linewidth=2, markersize=6)
+        plt.xlabel('Desplazamiento vertical (mm)', fontsize=12)
+        plt.ylabel('Carga vertical (kN)', fontsize=12)
+        plt.title('Curva Carga-Desplazamiento\nCentro de la Base de la Zapata', fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+
+        # Agregar información del modelo
+        info_text = f'Zapata: 2.5×2.5×0.6 m\nSuelo estratificado (elástico)\nProfundidad Df: 1.5 m'
+        plt.text(0.02, 0.98, info_text, transform=plt.gca().transAxes,
+                fontsize=9, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        # Agregar rigidez
+        if len(self.historia_carga) >= 2:
+            K = (self.historia_carga[-1] - self.historia_carga[0]) / (self.historia_despl[-1] - self.historia_despl[0])
+            plt.text(0.98, 0.02, f'Rigidez ≈ {K:.2f} kN/mm',
+                    transform=plt.gca().transAxes, fontsize=10,
+                    horizontalalignment='right', verticalalignment='bottom',
+                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
+
+        plt.tight_layout()
+
+        # Guardar
+        os.makedirs('resultados', exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archivo_grafica = os.path.join('resultados', f'carga_desplazamiento_{timestamp}.png')
+        plt.savefig(archivo_grafica, dpi=300, bbox_inches='tight')
+        print(f"\n  ✓ Gráfica guardada en: {archivo_grafica}")
+
+        # No mostrar en entorno sin display
+        # plt.show()
+        plt.close()
+
     def ejecutar(self):
         """Ejecuta el modelo completo"""
         print("\n" + "#"*60)
@@ -545,6 +621,7 @@ class ModeloZapata3DNoLineal:
 
             if exito:
                 self.extraer_resultados()
+                self.graficar_carga_desplazamiento()
                 print("\n" + "="*60)
                 print("ANÁLISIS COMPLETADO")
                 print("="*60)
